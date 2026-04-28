@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<title>OKI Fuel</title>
+
+<!-- PWA Meta -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0c0f14">
+<meta name="background-color" content="#0c0f14">
+
+<!-- iOS Specific -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="OKI Fuel">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+
+<!-- Prevent tap highlights, text selection on app-like UI -->
+<meta name="format-detection" content="telephone=no">
+
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #0c0f14;
+    --surface: #141820;
+    --surface-raised: #1a1f2a;
+    --border: rgba(255,255,255,0.06);
+    --border-hover: rgba(255,255,255,0.14);
+    --text: #e8eaed;
+    --text-dim: #7a8190;
+    --text-faint: #4a5060;
+    --accent-red: #e8443a;
+    --accent-gold: #f5b731;
+    --accent-green: #34c77b;
+    --accent-blue: #3b82f6;
+    --accent-cyan: #22d3ee;
+    --accent-red-glow: rgba(232,68,58,0.15);
+    --accent-gold-glow: rgba(245,183,49,0.15);
+    --accent-green-glow: rgba(52,199,123,0.15);
+    /* iOS safe areas */
+    --sat: env(safe-area-inset-top, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+    --sar: env(safe-area-inset-right, 0px);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { background: var(--bg); }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow-x: hidden;
+    -webkit-user-select: none; user-select: none;
+    overscroll-behavior-y: contain;
+  }
+  /* Allow text selection inside data areas */
+  .fuel-usd, .fuel-yen, .exchange-rate-display, .compare-table td,
+  .history-entry { -webkit-user-select: text; user-select: text; }
+
+  .noise-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E"); pointer-events: none; z-index: 0; }
+  .glow-orb { position: fixed; border-radius: 50%; filter: blur(120px); opacity: 0.07; pointer-events: none; z-index: 0; }
+  .glow-orb.red { width: 400px; height: 400px; background: var(--accent-red); top: -80px; right: -80px; }
+  .glow-orb.gold { width: 350px; height: 350px; background: var(--accent-gold); bottom: 100px; left: -120px; }
+
+  .container {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: calc(20px + var(--sat)) calc(20px + var(--sar)) calc(20px + var(--sab)) calc(20px + var(--sal));
+    position: relative;
+    z-index: 1;
+  }
+
+  /* PULL TO REFRESH indicator */
+  .pull-indicator {
+    position: fixed;
+    top: var(--sat, 0px);
+    left: 50%; transform: translateX(-50%) translateY(-50px);
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 50;
+    transition: transform 0.2s, opacity 0.2s;
+    opacity: 0;
+  }
+  .pull-indicator.visible { opacity: 1; }
+  .pull-indicator svg { width: 18px; height: 18px; color: var(--accent-blue); transition: transform 0.2s; }
+  .pull-indicator.ready svg { transform: rotate(180deg); color: var(--accent-green); }
+  .pull-indicator.refreshing svg { animation: spin 0.8s linear infinite; color: var(--accent-gold); }
+
+  /* HEADER */
+  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+  .header-left h1 { font-family: 'Space Mono', monospace; font-size: 22px; font-weight: 700; letter-spacing: -0.5px; line-height: 1.2; }
+  .header-left h1 span { color: var(--accent-red); }
+  .header-left .subtitle { font-size: 11px; color: var(--text-dim); margin-top: 5px; letter-spacing: 0.5px; text-transform: uppercase; }
+  .header-right { text-align: right; }
+  .exchange-rate-display { font-family: 'Space Mono', monospace; font-size: 20px; font-weight: 700; color: var(--accent-gold); }
+  .exchange-rate-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
+  .last-updated { font-size: 10px; color: var(--text-faint); margin-top: 5px; }
+
+  /* STATUS */
+  .status-bar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .status-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; color: var(--text-dim); padding: 4px 11px; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; letter-spacing: 0.3px; }
+  .status-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+  .status-dot.live { background: var(--accent-green); animation: pulse 2s infinite; }
+  .status-dot.stale { background: var(--accent-gold); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* ACTIONS */
+  .actions-row { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+  .action-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 10px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-dim);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px; font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .action-btn:active { transform: scale(0.97); opacity: 0.8; }
+  .action-btn.primary { background: var(--accent-blue); border-color: var(--accent-blue); color: #fff; }
+  .action-btn svg { width: 15px; height: 15px; }
+  .action-btn.spinning svg { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* INFO BAR */
+  .info-bar { display: flex; gap: 14px; margin-bottom: 20px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; flex-wrap: wrap; }
+  .info-chip { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
+  .info-chip .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--accent-blue); flex-shrink: 0; }
+  .info-chip strong { color: var(--text); font-weight: 500; }
+
+  /* STATION CARDS */
+  .stations-grid { display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 24px; }
+  .station-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px;
+    position: relative; overflow: hidden;
+    transition: transform 0.15s;
+  }
+  .station-card:active { transform: scale(0.99); }
+  .station-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, var(--card-accent, var(--accent-red)), transparent); opacity: 0.7; }
+  .station-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .station-name { font-family: 'Space Mono', monospace; font-size: 14px; font-weight: 700; letter-spacing: -0.3px; }
+  .station-type { font-size: 9px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-faint); padding: 3px 9px; border: 1px solid var(--border); border-radius: 20px; }
+  .fuel-rows { display: flex; flex-direction: column; gap: 8px; }
+  .fuel-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: var(--surface-raised); border-radius: 10px; border: 1px solid var(--border); }
+  .fuel-left { display: flex; align-items: center; gap: 10px; }
+  .fuel-nozzle { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+  .fuel-nozzle.regular { background: var(--accent-red); box-shadow: 0 0 8px var(--accent-red-glow); }
+  .fuel-nozzle.premium { background: var(--accent-gold); box-shadow: 0 0 8px var(--accent-gold-glow); }
+  .fuel-nozzle.diesel { background: var(--accent-green); box-shadow: 0 0 8px var(--accent-green-glow); }
+  .fuel-label { font-size: 13px; color: var(--text-dim); font-weight: 500; }
+  .fuel-yen { font-family: 'Space Mono', monospace; font-size: 11px; color: var(--text-faint); }
+  .fuel-price { text-align: right; }
+  .fuel-usd { font-family: 'Space Mono', monospace; font-size: 20px; font-weight: 700; color: var(--text); }
+  .fuel-unit { font-size: 9px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* COMPARE TABLE */
+  .comparison-section { margin-top: 4px; }
+  .section-title { font-family: 'Space Mono', monospace; font-size: 12px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+  .compare-table { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; border-collapse: separate; border-spacing: 0; }
+  .compare-table thead th { font-family: 'Space Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-faint); padding: 10px 10px; text-align: left; border-bottom: 1px solid var(--border); font-weight: 400; }
+  .compare-table thead th:not(:first-child) { text-align: right; }
+  .compare-table tbody td { padding: 10px 10px; font-size: 13px; border-bottom: 1px solid var(--border); }
+  .compare-table tbody tr:last-child td { border-bottom: none; }
+  .compare-table tbody td:first-child { font-weight: 500; color: var(--text); font-size: 12px; }
+  .compare-table tbody td:not(:first-child) { text-align: right; font-family: 'Space Mono', monospace; font-size: 12px; color: var(--text-dim); }
+  .compare-table tbody td .usd-val { color: var(--text); font-weight: 700; font-size: 14px; display: block; }
+  .compare-table tbody td .yen-val { font-size: 10px; color: var(--text-faint); }
+  .cheapest { color: var(--accent-green) !important; }
+
+  /* HISTORY */
+  .history-section { margin-top: 20px; }
+  .history-log { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px; max-height: 180px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .history-log::-webkit-scrollbar { width: 4px; }
+  .history-log::-webkit-scrollbar-track { background: transparent; }
+  .history-log::-webkit-scrollbar-thumb { background: var(--text-faint); border-radius: 2px; }
+  .history-entry { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 11px; }
+  .history-entry:last-child { border-bottom: none; }
+  .history-date { color: var(--text-faint); font-family: 'Space Mono', monospace; font-size: 10px; min-width: 110px; }
+  .history-source { color: var(--text-dim); flex: 1; margin: 0 8px; font-size: 10px; }
+  .history-prices { color: var(--text); font-family: 'Space Mono', monospace; font-size: 10px; white-space: nowrap; }
+  .history-empty { color: var(--text-faint); font-size: 12px; text-align: center; padding: 16px; }
+
+  /* FOOTER */
+  .footer-notes { margin-top: 20px; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; font-size: 11px; color: var(--text-faint); line-height: 1.7; }
+  .footer-notes strong { color: var(--text-dim); }
+
+  /* TOAST */
+  .toast { position: fixed; bottom: calc(20px + var(--sab)); left: 50%; transform: translateX(-50%) translateY(10px); padding: 10px 20px; background: var(--accent-green); color: #000; font-weight: 600; font-size: 13px; border-radius: 12px; opacity: 0; transition: all 0.3s; z-index: 100; pointer-events: none; white-space: nowrap; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* INSTALL BANNER */
+  .install-banner {
+    display: none;
+    background: linear-gradient(135deg, var(--accent-blue), #2563eb);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 20px;
+    color: #fff;
+    position: relative;
+  }
+  .install-banner.visible { display: block; animation: slideDown 0.3s ease-out; }
+  @keyframes slideDown { from{opacity:0;transform:translateY(-10px)} to{opacity:1;transform:translateY(0)} }
+  .install-banner h3 { font-family: 'Space Mono', monospace; font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+  .install-banner p { font-size: 12px; opacity: 0.9; line-height: 1.5; }
+  .install-banner .dismiss { position: absolute; top: 10px; right: 12px; background: none; border: none; color: rgba(255,255,255,0.6); font-size: 18px; cursor: pointer; padding: 4px; }
+
+  /* Desktop breakpoint — two columns */
+  @media (min-width: 700px) {
+    .stations-grid { grid-template-columns: repeat(2, 1fr); }
+    .container { padding: 36px 24px; }
+    .header-left h1 { font-size: 26px; }
+  }
+  @media (min-width: 1000px) {
+    .stations-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+</style>
+</head>
+<body>
+<div class="noise-overlay"></div>
+<div class="glow-orb red"></div>
+<div class="glow-orb gold"></div>
+
+<!-- Pull to refresh indicator -->
+<div class="pull-indicator" id="pullIndicator">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 13 12 18 17 13"/><line x1="12" y1="6" x2="12" y2="18"/></svg>
+</div>
+
+<div class="container" id="mainContainer">
+
+  <!-- Install hint (shown when not in standalone mode) -->
+  <div class="install-banner" id="installBanner">
+    <button class="dismiss" onclick="dismissInstall()">&times;</button>
+    <h3>Add to Home Screen</h3>
+    <p>Open this page in Safari, tap <strong>Share ↗</strong> then <strong>"Add to Home Screen"</strong> for a full-screen app experience with offline support.</p>
+  </div>
+
+  <header class="header">
+    <div class="header-left">
+      <h1>OKINAWA <span>FUEL</span><br>PRICE TRACKER</h1>
+      <div class="subtitle">Gas Stations &bull; USD / Gallon</div>
+    </div>
+    <div class="header-right">
+      <div class="exchange-rate-display" id="rateDisplay">---</div>
+      <div class="exchange-rate-label">JPY / USD</div>
+      <div class="last-updated" id="lastUpdated">Loading...</div>
+    </div>
+  </header>
+
+  <div class="status-bar" id="statusBar"></div>
+
+  <div class="actions-row">
+    <button class="action-btn primary" id="refreshAllBtn" onclick="refreshAll()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+      Refresh Data
+    </button>
+    <button class="action-btn" onclick="clearHistory()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+      Clear History
+    </button>
+  </div>
+
+  <div class="info-bar">
+    <div class="info-chip"><div class="dot"></div><span>1 Gal = <strong>3.785 L</strong></span></div>
+    <div class="info-chip"><div class="dot"></div><span><strong style="color:var(--accent-red)">●</strong> Reg <strong style="color:var(--accent-gold)">●</strong> Prem <strong style="color:var(--accent-green)">●</strong> Diesel</span></div>
+    <div class="info-chip"><div class="dot"></div><span><strong>ANRE &bull; GlobalPetrolPrices</strong></span></div>
+  </div>
+
+  <div class="stations-grid" id="stationsGrid"></div>
+
+  <div class="comparison-section">
+    <div class="section-title">Comparison &mdash; $/Gallon</div>
+    <table class="compare-table">
+      <thead><tr><th>Station</th><th>Regular</th><th>Premium</th><th>Diesel</th></tr></thead>
+      <tbody id="compareBody"></tbody>
+    </table>
+  </div>
+
+  <div class="history-section">
+    <div class="section-title">Update History</div>
+    <div class="history-log" id="historyLog"></div>
+  </div>
+
+  <div class="footer-notes">
+    <strong>Sources &amp; Notes</strong><br>
+    &bull; Exchange rate fetched live from ECB (frankfurter.app) with fallback to Open Exchange Rates.<br>
+    &bull; Fuel prices from Japan's ANRE weekly data + Okinawa regional adjustment. Live fetch attempted from GlobalPetrolPrices on each refresh.<br>
+    &bull; Station estimates: ENEOS (highest), JA-SS (lowest). Pull down to refresh.<br>
+    &bull; Data cached offline via service worker for use without connectivity.
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════
+// SERVICE WORKER REGISTRATION
+// ═══════════════════════════════════════
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+
+// ═══════════════════════════════════════
+// INSTALL BANNER
+// ═══════════════════════════════════════
+function checkInstallBanner() {
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+  const dismissed = localStorage.getItem('oki_install_dismissed');
+  if (!isStandalone && !dismissed) {
+    document.getElementById('installBanner').classList.add('visible');
+  }
+}
+function dismissInstall() {
+  document.getElementById('installBanner').classList.remove('visible');
+  localStorage.setItem('oki_install_dismissed', '1');
+}
+
+// ═══════════════════════════════════════
+// PULL TO REFRESH
+// ═══════════════════════════════════════
+let pullStartY = 0, pulling = false, pullDist = 0;
+const PULL_THRESHOLD = 80;
+const indicator = document.getElementById('pullIndicator');
+
+document.addEventListener('touchstart', e => {
+  if (window.scrollY === 0 && e.touches.length === 1) {
+    pullStartY = e.touches[0].clientY;
+    pulling = true;
+  }
+}, { passive: true });
+
+document.addEventListener('touchmove', e => {
+  if (!pulling) return;
+  pullDist = Math.max(0, e.touches[0].clientY - pullStartY);
+  if (pullDist > 10) {
+    const show = Math.min(pullDist, PULL_THRESHOLD + 30);
+    indicator.style.transform = `translateX(-50%) translateY(${show - 30}px)`;
+    indicator.classList.add('visible');
+    indicator.classList.toggle('ready', pullDist >= PULL_THRESHOLD);
+  }
+}, { passive: true });
+
+document.addEventListener('touchend', () => {
+  if (pulling && pullDist >= PULL_THRESHOLD) {
+    indicator.classList.remove('ready');
+    indicator.classList.add('refreshing');
+    refreshAll().then(() => {
+      setTimeout(() => {
+        indicator.classList.remove('visible', 'refreshing');
+        indicator.style.transform = 'translateX(-50%) translateY(-50px)';
+      }, 400);
+    });
+  } else {
+    indicator.classList.remove('visible', 'ready');
+    indicator.style.transform = 'translateX(-50%) translateY(-50px)';
+  }
+  pulling = false;
+  pullDist = 0;
+}, { passive: true });
+
+// ═══════════════════════════════════════
+// DATA
+// ═══════════════════════════════════════
+const LITERS_PER_GALLON = 3.78541;
+const DEFAULT_NATIONAL = { regular: 169.5, premium: 180.3, diesel: 158.8 };
+const OKI_OFFSET = { regular: 3.5, premium: 3.7, diesel: 1.2 };
+
+const STATION_DEFS = [
+  { id:'eneos',    name:'ENEOS',        type:'Full / Self',  accent:'#e8443a', offsets:{regular:1,premium:1,diesel:1} },
+  { id:'idemitsu', name:'Idemitsu',     type:'Self Serve',   accent:'#3b82f6', offsets:{regular:-2,premium:-2,diesel:-1} },
+  { id:'cosmo',    name:'Cosmo Oil',    type:'Full / Self',  accent:'#8b5cf6', offsets:{regular:0,premium:0,diesel:0} },
+  { id:'shell',    name:'Shell/Apollo', type:'Self Serve',   accent:'#f5b731', offsets:{regular:-1,premium:-1,diesel:-2} },
+  { id:'jass',     name:'JA-SS',        type:'Full Serve',   accent:'#34c77b', offsets:{regular:-3,premium:-3,diesel:-3} },
+  { id:'avg',      name:'Okinawa Avg',  type:'Regional Avg', accent:'#f97316', offsets:{regular:0,premium:0,diesel:0} },
+];
+
+let currentRate = 159.2, rateSource = 'fallback';
+let nationalPrices = {...DEFAULT_NATIONAL};
+let priceHistory = [];
+
+function loadSaved() { try { const s=localStorage.getItem('oki_gas_v3'); if(s){const d=JSON.parse(s); if(d.np)nationalPrices=d.np; if(d.h)priceHistory=d.h; if(d.r)currentRate=d.r;} }catch(e){} }
+function saveData() { try { localStorage.setItem('oki_gas_v3',JSON.stringify({np:nationalPrices,h:priceHistory,r:currentRate})); }catch(e){} }
+
+function getStationPrices(s) {
+  return {
+    regular: Math.round(nationalPrices.regular + OKI_OFFSET.regular + s.offsets.regular),
+    premium: Math.round(nationalPrices.premium + OKI_OFFSET.premium + s.offsets.premium),
+    diesel:  Math.round(nationalPrices.diesel  + OKI_OFFSET.diesel  + s.offsets.diesel),
+  };
+}
+function y2u(y) { return (y * LITERS_PER_GALLON) / currentRate; }
+function fmt(v) { return '$' + v.toFixed(2); }
+
+// ═══════════════════════════════════════
+// FETCH
+// ═══════════════════════════════════════
+async function fetchExchangeRate() {
+  try { const r=await fetch('https://api.frankfurter.app/latest?from=USD&to=JPY'); if(r.ok){const d=await r.json(); if(d.rates?.JPY){currentRate=d.rates.JPY; rateSource='ECB'; return true;}} }catch(e){}
+  try { const r=await fetch('https://open.er-api.com/v6/latest/USD'); if(r.ok){const d=await r.json(); if(d.rates?.JPY){currentRate=d.rates.JPY; rateSource='OpenER'; return true;}} }catch(e){}
+  rateSource='fallback'; return false;
+}
+
+async function fetchNationalPrices() {
+  try {
+    const r=await fetch('https://www.globalpetrolprices.com/Japan/gasoline_prices/');
+    if(r.ok){const t=await r.text(); const m=t.match(/JPY\s+([\d.]+)\s+per liter/i); if(m){const p=parseFloat(m[1]); if(p>100&&p<300){nationalPrices.regular=p; nationalPrices.premium=p+10.8; return 'GlobalPetrolPrices';}}}
+  }catch(e){}
+  try {
+    const r=await fetch('https://www.globalpetrolprices.com/Japan/diesel_prices/');
+    if(r.ok){const t=await r.text(); const m=t.match(/JPY\s+([\d.]+)\s+per liter/i); if(m){const p=parseFloat(m[1]); if(p>80&&p<300) nationalPrices.diesel=p;}}
+  }catch(e){}
+  return null;
+}
+
+async function refreshAll() {
+  const btn=document.getElementById('refreshAllBtn'); btn.classList.add('spinning'); btn.disabled=true;
+  const rateLive=await fetchExchangeRate();
+  const priceSrc=await fetchNationalPrices();
+  btn.classList.remove('spinning'); btn.disabled=false;
+  document.getElementById('rateDisplay').textContent=currentRate.toFixed(2);
+  const now=new Date();
+  document.getElementById('lastUpdated').textContent=`${rateSource} • ${now.toLocaleDateString('en-US',{month:'short',day:'numeric'})} ${now.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}`;
+  updateStatusBar(rateLive,priceSrc);
+  addHistory(rateLive?'live':'fallback',priceSrc||'Saved estimates');
+  renderAll(); saveData(); showToast('Updated!');
+}
+
+function updateStatusBar(rateLive,priceSrc) {
+  document.getElementById('statusBar').innerHTML=`
+    <div class="status-pill"><span class="status-dot ${rateLive?'live':'stale'}"></span>FX: ${rateLive?'Live':'Fallback'}</div>
+    <div class="status-pill"><span class="status-dot ${priceSrc?'live':'stale'}"></span>Fuel: ${priceSrc||'Saved'}</div>
+  `;
+}
+
+// ═══════════════════════════════════════
+// RENDER
+// ═══════════════════════════════════════
+function renderStationCards() {
+  const g=document.getElementById('stationsGrid'); g.innerHTML='';
+  STATION_DEFS.forEach(s=>{
+    const p=getStationPrices(s);
+    const c=document.createElement('div'); c.className='station-card'; c.style.setProperty('--card-accent',s.accent);
+    c.innerHTML=`<div class="station-header"><div class="station-name">${s.name}</div><div class="station-type">${s.type}</div></div>
+    <div class="fuel-rows">${fuelRow('regular','Regular',p.regular)}${fuelRow('premium','Premium',p.premium)}${fuelRow('diesel','Diesel',p.diesel)}</div>`;
+    g.appendChild(c);
+  });
+}
+function fuelRow(gr,lb,yn) { return `<div class="fuel-row"><div class="fuel-left"><div class="fuel-nozzle ${gr}"></div><div><div class="fuel-label">${lb}</div><div class="fuel-yen">¥${yn}/L</div></div></div><div class="fuel-price"><div class="fuel-usd">${fmt(y2u(yn))}</div><div class="fuel-unit">per gallon</div></div></div>`; }
+
+function renderCompareTable() {
+  const tb=document.getElementById('compareBody'); tb.innerHTML='';
+  const ap=STATION_DEFS.map(s=>getStationPrices(s));
+  const mr=Math.min(...ap.map(p=>p.regular)),mp=Math.min(...ap.map(p=>p.premium)),md=Math.min(...ap.map(p=>p.diesel));
+  STATION_DEFS.forEach((s,i)=>{const p=ap[i]; tb.innerHTML+=`<tr><td>${s.name}</td>
+    <td><span class="usd-val ${p.regular===mr?'cheapest':''}">${fmt(y2u(p.regular))}</span><span class="yen-val">¥${p.regular}/L</span></td>
+    <td><span class="usd-val ${p.premium===mp?'cheapest':''}">${fmt(y2u(p.premium))}</span><span class="yen-val">¥${p.premium}/L</span></td>
+    <td><span class="usd-val ${p.diesel===md?'cheapest':''}">${fmt(y2u(p.diesel))}</span><span class="yen-val">¥${p.diesel}/L</span></td></tr>`;});
+}
+
+function renderHistory() {
+  const l=document.getElementById('historyLog');
+  if(!priceHistory.length){l.innerHTML='<div class="history-empty">No updates yet. Tap Refresh or pull down.</div>';return;}
+  l.innerHTML=priceHistory.slice().reverse().map(h=>`<div class="history-entry"><div class="history-date">${h.d}</div><div class="history-source">${h.s}</div><div class="history-prices">${h.r?`¥${h.ar} @ ${h.r.toFixed(0)}`:''}</div></div>`).join('');
+}
+
+function renderAll() { renderStationCards(); renderCompareTable(); renderHistory(); }
+
+function addHistory(type,src) {
+  const a=getStationPrices(STATION_DEFS.find(s=>s.id==='avg'));
+  priceHistory.push({d:new Date().toLocaleString('en-US',{dateStyle:'short',timeStyle:'short'}),s:src||type,ar:a.regular,r:currentRate});
+  if(priceHistory.length>50) priceHistory=priceHistory.slice(-50);
+}
+function clearHistory() { priceHistory=[]; saveData(); renderHistory(); showToast('History cleared'); }
+
+function showToast(m) { const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2000); }
+
+// ═══════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════
+loadSaved();
+refreshAll();
+checkInstallBanner();
+</script>
+</body>
+</html>
